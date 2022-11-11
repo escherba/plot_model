@@ -6,8 +6,8 @@ from __future__ import print_function
 import os
 import sys
 import re
+from collections import abc
 from tensorflow.python.util import nest
-from tensorflow.python.util.tf_export import keras_export
 
 try:
     from tensorflow.python.keras.engine.functional import (
@@ -59,6 +59,15 @@ def add_edge(dot, src, dst, output_shape=None):
             dot.add_edge(pydot.Edge(src, dst, label=output_shape))
         else:
             dot.add_edge(pydot.Edge(src, dst))
+
+
+def get_activation_label(config):
+    if "activation" not in config:
+        return None
+    res = config["activation"]
+    if isinstance(res, abc.Mapping):
+        res = res["class_name"]
+    return res
 
 
 def model_to_dot(
@@ -137,7 +146,8 @@ def model_to_dot(
     elif isinstance(model, sequential.Sequential):
         if not model.built:
             model.build()
-    layers = model._layers
+
+    layers = model.layers  # previously: model._layers
 
     # Create graph nodes.
     for i, layer in enumerate(layers):
@@ -189,7 +199,6 @@ def model_to_dot(
             dot.add_subgraph(submodel_not_wrapper)
 
         # Create node's label.
-
         if show_layer_names:
             label = "{}: {}".format(layer_name, class_name)
             inputs = re.compile("input")
@@ -221,7 +230,7 @@ def model_to_dot(
                     activation = re.compile("activation")
                     if activation.findall(class_name_lower):
                         label = "{}:{}|{}".format(
-                            layer_name, class_name, config["activation"]
+                            layer_name, class_name, get_activation_label(config)
                         )
                     dropout = re.compile("dropout")
                     if dropout.findall(class_name_lower):
@@ -231,11 +240,14 @@ def model_to_dot(
                     dense = re.compile("dense")
                     if dense.findall(class_name_lower):
                         label = "{}:{}|{}".format(
-                            layer_name, class_name, config["activation"]
+                            layer_name, class_name, get_activation_label(config)
                         )
 
         else:
-            label = "{}".format(class_name)
+            if class_name == "InputLayer":
+                label = layer_name
+            else:
+                label = "{}".format(class_name)
             inputs = re.compile("input")
             if inputs.findall(class_name_lower):
                 pass
@@ -262,13 +274,13 @@ def model_to_dot(
                         )
                     activation = re.compile("activation")
                     if activation.findall(class_name_lower):
-                        label = "{}|{}".format(class_name, config["activation"])
+                        label = "{}|{}".format(class_name, get_activation_label(config))
                     dropout = re.compile("dropout")
                     if dropout.findall(class_name_lower):
                         label = "{}|{}".format(class_name, config["rate"])
                     dense = re.compile("dense")
                     if dense.findall(class_name_lower):
-                        label = "{}|{}".format(class_name, config["activation"])
+                        label = "{}|{}".format(class_name, get_activation_label(config))
 
         # Rebuild the label as a table including input/output shapes.
         if show_shapes:
@@ -294,12 +306,12 @@ def model_to_dot(
                 if inputs.findall(class_name_lower):
                     label = "{%s}|{input:}|{%s}" % (label, inputlabels)
                 else:
-                    for i, node in enumerate(layer._inbound_nodes):
+                    for node in layer._inbound_nodes:
                         for outbound_layer in nest.flatten(node.outbound_layer):
-                            if outbound_layer.outbound_nodes == []:
-                                label = "{%s}|{output:}|{%s}" % (label, outputlabels)
+                            if outbound_layer.outbound_nodes:
+                                label = "{%s}" % label
                             else:
-                                label = "{%s}" % (label)
+                                label = "{%s}|{output:}|{%s}" % (label, outputlabels)
             elif style == 1:
                 label = "{%s}|{input:|output:}|{{%s}|{%s}}" % (
                     label,
@@ -538,14 +550,14 @@ def plot_model(
     Example:
 
     >>> import tensorflow as tf
-    >>> input = tf.keras.Input(shape=(100,), dtype='int32', name='input')
-    >>> x = tf.keras.layers.Embedding(output_dim=512, input_dim=10000, input_length=100)(input)
+    >>> inp = tf.keras.Input(shape=(100,), dtype='int32', name='input')
+    >>> x = tf.keras.layers.Embedding(output_dim=512, input_dim=10000, input_length=100)(inp)
     >>> x = tf.keras.layers.LSTM(32)(x)
     >>> x = tf.keras.layers.Dense(64, activation='relu')(x)
     >>> x = tf.keras.layers.Dense(64, activation='relu')(x)
     >>> x = tf.keras.layers.Dense(64, activation='relu')(x)
-    >>> output = tf.keras.layers.Dense(1, activation='sigmoid', name='output')(x)
-    >>> model = tf.keras.Model(inputs=[input], outputs=[output])
+    >>> out = tf.keras.layers.Dense(1, activation='sigmoid', name='output')(x)
+    >>> model = tf.keras.Model(inputs=[inp], outputs=[out])
     >>> dot_img_file = '/tmp/model_1.png'
     >>> plot_model(model, to_file=dot_img_file, show_shapes=True)
     <IPython.core.display.Image object>
